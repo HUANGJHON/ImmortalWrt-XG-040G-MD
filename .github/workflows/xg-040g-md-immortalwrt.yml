@@ -5,7 +5,6 @@ permissions:
   actions: write
 
 on:
-  # 手动触发（保留原有功能 + 新增补丁选择）
   workflow_dispatch:
     inputs:
       log_switch:
@@ -17,7 +16,6 @@ on:
         description: "指定Git提交哈希(留空默认使用最新提交)"
         required: false
         type: string
-      # 新增：补丁版本选择
       patch_type:
         description: "选择补丁版本"
         required: true
@@ -26,7 +24,7 @@ on:
         options:
           - patch-bingoguo93
           - patch-xiangtailiang
-  # 新增：定时自动触发（每6小时检查一次远程仓库新Commit，UTC时间）
+  # 每24小时检查一次（UTC 0点，北京时间8点）
   schedule:
     - cron: '0 0 * * *'
 
@@ -41,27 +39,23 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 仅当需要构建时才执行（自动触发：有新Commit | 手动触发：直接执行）
-    if: steps.check_commit.outputs.should_build == 'true'
+    # 🔥 修复点：删除了非法的 job 级别 if 判断
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # ====================== 新增：自动检测远程仓库新Commit ======================
       - name: Check remote branch for new commits
         id: check_commit
         run: |
-          # 获取远程分支最新完整Commit哈希
           LATEST_COMMIT=$(git ls-remote ${{ env.REPO_URL }} ${{ env.REPO_BRANCH }} | awk '{print $1}')
           echo "LATEST_COMMIT=$LATEST_COMMIT" >> $GITHUB_ENV
           echo "🔍 远程分支最新Commit: $LATEST_COMMIT"
           
-          # 读取上一次构建的Commit（缓存）
           CACHED_COMMIT=$(cat last_commit.txt 2>/dev/null || echo "")
           echo "🔍 上一次构建Commit: $CACHED_COMMIT"
           
-          # 定时触发：无更新则终止构建；手动触发：直接构建
+          # 定时触发：无更新则终止构建
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             if [[ "$LATEST_COMMIT" == "$CACHED_COMMIT" ]]; then
               echo "✅ 无新Commit，终止定时构建"
@@ -76,7 +70,11 @@ jobs:
             echo "should_build=true" >> $GITHUB_OUTPUT
           fi
 
-      # 缓存Commit记录，用于下次对比
+      # 🔥 修复点：步骤内部判断，无更新直接退出Job（语法合法）
+      - name: Exit if no new commit
+        if: steps.check_commit.outputs.should_build == 'false'
+        run: exit 0
+
       - name: Cache last commit record
         uses: actions/cache@v4
         with:
@@ -115,31 +113,25 @@ jobs:
           python3 -m pip install --upgrade pip setuptools wheel
           python3 -m pip install Unidecode
 
-      # ====================== 克隆源码（支持指定Commit/最新Commit） ======================
       - name: Clone OpenWrt source code
         run: |
           git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" openwrt
           cd openwrt
-          # 指定提交哈希
           if [ -n "${{ inputs.commit_hash }}" ]; then
             git fetch origin ${{ inputs.commit_hash }}
             git checkout ${{ inputs.commit_hash }}
           fi
-          # 导出完整+短Commit信息（修复原BUG）
           echo "COMMIT_HASH_FULL=$(git rev-parse HEAD)" >> $GITHUB_ENV
           echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
           echo "COMMIT_MSG=$(git log -1 --pretty=format:%s)" >> $GITHUB_ENV
           echo "COMMIT_DATE=$(git log -1 --pretty=format:"%Y-%m-%d %H:%M:%S" --date=local)" >> $GITHUB_ENV
 
-      # ====================== 优化：动态应用所选补丁 ======================
       - name: Apply XG-040G-MD Patch Files
         working-directory: ./openwrt
         run: |
-          # 获取用户选择的补丁
           SELECTED_PATCH=${{ inputs.patch_type || 'patch-bingoguo93' }}
           echo "SELECTED_PATCH=$SELECTED_PATCH" >> $GITHUB_ENV
           
-          # 校验补丁文件并应用
           if [ -d "../$SELECTED_PATCH" ] && [ -f "../$SELECTED_PATCH/patch.sh" ]; then
             echo "--- 正在应用补丁：$SELECTED_PATCH ---"
             cp -r -f ../$SELECTED_PATCH .
@@ -206,7 +198,6 @@ jobs:
           name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}/*
 
-      # ====================== 优化：Release新增补丁信息 ======================
       - name: Generate release tag and notes
         id: tag
         if: env.UPLOAD_RELEASE == 'true'

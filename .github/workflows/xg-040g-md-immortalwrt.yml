@@ -78,6 +78,7 @@ jobs:
           # 获取最终使用的提交信息（用于Release展示）
           echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
           echo "COMMIT_MSG=$(git log -1 --pretty=format:%s)" >> $GITHUB_ENV
+          echo "COMMIT_DATE=$(git log -1 --pretty=format:"%Y-%m-%d %H:%M:%S" --date=local)" >> $GITHUB_ENV
 
       - name: Apply XG-040G-MD Patch Files
         working-directory: ./openwrt
@@ -164,8 +165,9 @@ jobs:
           构建时间: $(date +"%Y-%m-%d %H:%M")
           源码仓库: ${{ env.REPO_URL }}
           分支: ${{ env.REPO_BRANCH }}
-          提交哈希: ${{ env.COMMIT_HASH }}
-          提交说明: ${{ env.COMMIT_MSG }}
+          Commit Date: ${{ env.COMMIT_DATE }}
+          Commit Hash: ${{ env.COMMIT_HASH }}
+          Commit: [${{ env.COMMIT_MSG }}](${{ env.REPO_URL }}/commit/${{ env.COMMIT_HASH_FULL }})  # 新增可点击链接
           EOF
 
       - name: Publish GitHub Release
